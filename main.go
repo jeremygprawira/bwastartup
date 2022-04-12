@@ -5,13 +5,15 @@ import (
 	"bwastartup/campaign"
 	"bwastartup/handler"
 	"bwastartup/helper"
+	"bwastartup/payment"
+	"bwastartup/transaction"
 	"bwastartup/user"
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
 
 	"github.com/dgrijalva/jwt-go"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -28,16 +30,25 @@ func main() {
 
 	userRepository := user.NewRepository(db)
 	campaignRepository := campaign.NewRepository(db)
+	transactionRepository := transaction.NewRepository(db)
 
-	fmt.Println("hai")
 	userService := user.NewService(userRepository)
 	campaignService := campaign.NewService(campaignRepository)
 	authService := auth.NewService()
+	paymentService := payment.NewService()
+	transactionService := transaction.NewService(transactionRepository, campaignRepository, paymentService)
 
 	userHandler := handler.NewUserHandler(userService, authService)
 	campaignHandler := handler.NewCampaignHandler(campaignService)
+	transactionHandler := handler.NewTransactionHandler(transactionService)
 
 	router := gin.Default()
+	router.Use(cors.Default())
+	router.Use(cors.New(cors.Config{
+		AllowOrigins: []string{"http://localhost:8080"},
+		AllowMethods: []string{"OPTIONS", "GET", "PATCH", "POST", "DELETE"},
+		AllowHeaders: []string{"Authorization", "Content-Type"},
+	}))
 	router.Static("/images", "./images")
 	api := router.Group("/api/v1")
 
@@ -46,7 +57,21 @@ func main() {
 	api.POST("/email_checkers", userHandler.CheckEmailAvailability)
 	api.POST("/avatars", authMiddleware(authService, userService), userHandler.UploadAvatar)
 
+	api.GET("/users/fetch", authMiddleware(authService, userService), userHandler.FetchUser)
+
 	api.GET("/campaigns", campaignHandler.GetCampaigns)
+	api.GET("/campaigns/:id", campaignHandler.GetCampaign)
+
+	api.POST("/campaigns", authMiddleware(authService, userService), campaignHandler.CreateCampaign)
+	api.POST("/campaign-images", authMiddleware(authService, userService), campaignHandler.UpdloadImage)
+
+	api.PUT("/campaigns/:id", authMiddleware(authService, userService), campaignHandler.UpdateCampaign)
+
+	api.GET("/campaigns/:id/transactions", authMiddleware(authService, userService), transactionHandler.GetCampaignTransaction)
+	api.GET("transactions", authMiddleware(authService, userService), transactionHandler.GetUserTransactions)
+
+	api.POST("/transactions", authMiddleware(authService, userService), transactionHandler.CreateTransaction)
+	api.POST("/transactions/notification", transactionHandler.GetNotification)
 
 	router.Run()
 
